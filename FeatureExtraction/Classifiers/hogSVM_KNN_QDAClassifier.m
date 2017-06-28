@@ -1,0 +1,113 @@
+function [hogSVM_KNN_QDAClassifiers,modelPredAgreementCount,modelPredDisagreementCount,onlyTwoAgreement,allThreeAgremement,knn_SvmAgreement,qda_SvmAgreement] = hogSVM_KNN_QDAClassifier(trainHOGFeat,train_labels)
+%Timer for comparison between ensembled classifier vs Deep learning training
+tic          %set a clock
+
+%Training data matrix for each feature
+Ytrain = train_labels;          % Common labels indicating whether image is kangaroo or not Kangaroos
+XtrainHOG = trainHOGFeat;       % n-by-m matrix containing HOG features representing image  
+
+modelPredAgreementCount = 0;
+modelPredDisagreementCount = 0;
+onlyTwoAgreement = 0;
+allThreeAgremement = 0;
+knn_SvmAgreement = 0;
+qda_SvmAgreement = 0;
+
+
+disp('Currently training classifiers .........')
+
+hog_SVM_classifier = fitcsvm(XtrainHOG,Ytrain, 'KernelFunction','polynomial', ...
+    'PolynomialOrder',3,'KernelScale','auto','BoxConstraint',5, 'Standardize', true, ...
+    'ClassNames', {'Kangaroo'; 'Not Kangaroo'});
+
+hog_KNN_classifier = fitcknn(XtrainHOG,Ytrain,'Distance', 'Euclidean', ...
+    'Exponent', [],'NumNeighbors', 10,'DistanceWeight', 'Equal', ...
+    'Standardize', true,'ClassNames', {'Kangaroo'; 'Not Kangaroo'});
+hog_QDA_classifier = fitcdiscr(XtrainHOG,Ytrain,'DiscrimType', 'diagQuadratic', ...
+		'FillCoeffs', 'off','SaveMemory', 'on','ClassNames', {'Kangaroo'; 'Not Kangaroo'});
+    
+disp('Training classifiers complete!')
+disp('.............................................................................. .........')
+
+disp('Currently cross validating classifiers .........')
+%Cross validation of each classifiers
+hogKNNCVModel = crossval(hog_KNN_classifier, 'KFold', 10);
+hogSVMCVModel = crossval(hog_SVM_classifier, 'KFold', 10);
+hogQDACVModel = crossval(hog_QDA_classifier, 'KFold', 10);
+disp('Cross validation of classifiers complete!')
+
+disp('Currently computing classifiers cross validation predictions.........')
+%Cross validation Classifiers accuracies
+[hogKNNCVModelValPredictions, hogKNNCVModelValScores] = kfoldPredict(hogKNNCVModel);
+[hogSVMCVModelValPredictions, hogSVMCVModelValScores] = kfoldPredict(hogSVMCVModel);
+[hogQDACVModelValPredictions, hogQDACVModelValScores] = kfoldPredict(hogQDACVModel);
+disp('Cross validation predictions of classifiers complete!')
+
+%Cross validation Confusion matrices for each classifiers
+disp('Computing models cross validation confusion matrices for each of the classifiers')
+disp('--------------------------------------------------------------------')
+hogSVMConfMatrix = confusionmat(Ytrain,hogKNNCVModelValPredictions)
+hogKNNConfMatrix = confusionmat(Ytrain,hogSVMCVModelValPredictions)
+hogQDAConfMatrix = confusionmat(Ytrain,hogQDACVModelValPredictions)
+
+%add cross validated classifiers to the list
+hogSVM_KNN_QDAClassifiers = [];
+hogSVM_KNN_QDAClassifiers{1} = hog_KNN_classifier;
+hogSVM_KNN_QDAClassifiers{2} = hog_SVM_classifier;
+hogSVM_KNN_QDAClassifiers{3} = hog_QDA_classifier;
+
+disp('Computing cross validation binomial trials.................')
+%Binomial trials on cross validation
+model1Binom = [];
+model2Binom = [];
+model3Binom = [];
+for i=1:length(Ytrain)
+    %for Model 1
+   if strcmp(Ytrain{i},'Kangaroo')==1 && strcmp(hogKNNCVModelValPredictions{i},'Kangaroo')==1
+        model1Binom{i} = 1;
+    elseif strcmp(Ytrain{i},'Not Kangaroo')==1 && strcmp(hogKNNCVModelValPredictions{i},'Not Kangaroo')==1
+        model1Binom{i} = 1;
+    else
+        model1Binom{i} = 0;
+   end
+   %for Model 2
+   if strcmp(Ytrain{i},'Kangaroo')==1 && strcmp(hogSVMCVModelValPredictions{i},'Kangaroo')==1
+        model2Binom{i} = 1;
+    elseif strcmp(Ytrain{i},'Not Kangaroo')==1 && strcmp(hogSVMCVModelValPredictions{i},'Not Kangaroo')==1
+        model2Binom{i} = 1;
+    else
+        model2Binom{i} = 0;
+   end
+   %for Model 3
+   if strcmp(Ytrain{i},'Kangaroo')==1 && strcmp(hogQDACVModelValPredictions{i},'Kangaroo')==1
+        model3Binom{i} = 1;
+    elseif strcmp(Ytrain{i},'Not Kangaroo')==1 && strcmp(hogQDACVModelValPredictions{i},'Not Kangaroo')==1
+        model3Binom{i} = 1;
+    else
+        model3Binom{i} = 0;
+   end
+end
+disp('Computing cross validation binomial trials complete!')
+
+disp('Now comparing cross validation predictions between classifiers for model agreements..........')
+%compare the number of times each classification models agrees on a cross-validated set
+%models combinations should be used for predicitons
+for k=1:length(Ytrain)
+    if model1Binom{k}== model2Binom{k} 
+        modelPredAgreementCount = modelPredAgreementCount + 1;
+        onlyTwoAgreement = onlyTwoAgreement + 1;
+        knn_SvmAgreement = knn_SvmAgreement + 1;
+    elseif model1Binom{k}== model3Binom{k}
+        modelPredAgreementCount = modelPredAgreementCount + 1;
+        onlyTwoAgreement = onlyTwoAgreement + 1;
+    elseif model2Binom{k}== model3Binom{k}
+        modelPredAgreementCount = modelPredAgreementCount + 1;
+        onlyTwoAgreement = onlyTwoAgreement + 1;
+        qda_SvmAgreement = qda_SvmAgreement + 1;
+    elseif model2Binom{k}== model3Binom{k} && model2Binom{k}== model1Binom{k}
+        modelPredAgreementCount = modelPredAgreementCount + 1;
+    else
+        modelPredDisagreementCount = modelPredDisagreementCount +1;
+        allThreeAgremement = allThreeAgremement + 1;
+    end
+end
